@@ -50,4 +50,12 @@ public class InMemoryTxnRepo implements TxnRepo {
                 .findFirst()
         );
     }
+
+    public void clear() {
+        txnById.clear();
+    }
+
+    public Txn findById(Long id) {
+        return txnById.get(id);
+    }
 }

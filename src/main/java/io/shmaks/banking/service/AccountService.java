@@ -31,19 +31,14 @@ public class AccountService {
     }
 
     @Transactional(readOnly = true)
-    public Mono<AccountResponse> findByAccountNumber(String accountNumber) {
-        return repo.findByAccountNumber(accountNumber).map(AccountResponse::new);
-    }
-
-    @Transactional(readOnly = true)
-    public Mono<List<AccountResponse>> findAccounts(String ownerId, Pagination<String> pagination) {
-        return repo.findAllByOwnerIdOrderByAccountNumberAsc(ownerId, pagination.getCount(), pagination.getAfter())
+    public Mono<List<AccountResponse>> findUserAccounts(String ownerId, Pagination<String> pagination) {
+        return repo.findAllUserAccountsByOwnerIdOrderByAccountNumberAsc(ownerId, pagination.getCount(), pagination.getAfter())
                 .map(list -> list.stream().map(AccountResponse::new).collect(Collectors.toList()));
     }
 
     @Transactional(readOnly = true)
-    public Mono<List<AccountResponse>> findAllAccounts(Pagination<String> pagination) {
-        return repo.findAllOrderByAccountNumberAsc(pagination.getCount(), pagination.getAfter())
+    public Mono<List<AccountResponse>> findAllUserAccounts(Pagination<String> pagination) {
+        return repo.findAllUserAccountsOrderByAccountNumberAsc(pagination.getCount(), pagination.getAfter())
                 .map(list -> list.stream().map(AccountResponse::new).collect(Collectors.toList()));
     }
 

@@ -1,12 +1,8 @@
 package io.shmaks.banking.controller;
 
-import org.springframework.context.annotation.Configuration;
-import org.springframework.web.reactive.config.WebFluxConfigurer;
-
 import java.util.Base64;
 
-@Configuration
-public class TestWebFluxConfig implements WebFluxConfigurer {
+public class TestHelper {
 
     static final String USER_OWNER_ID = "alice";
     static final String OTHER_OWNER_ID = "bob";

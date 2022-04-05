@@ -3,6 +3,7 @@ package io.shmaks.banking.service;
 import io.shmaks.banking.ext.CurrencyPair;
 import io.shmaks.banking.ext.CurrencyService;
 import io.shmaks.banking.ext.FeeService;
+import io.shmaks.banking.model.Account;
 import io.shmaks.banking.model.AccountType;
 import io.shmaks.banking.model.TxnGroup;
 import io.shmaks.banking.model.TxnSpendingType;
@@ -17,10 +18,13 @@ import io.shmaks.banking.service.processors.WithdrawalProcessor;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
+import reactor.util.function.Tuples;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public class TransferService {
@@ -51,30 +55,51 @@ public class TransferService {
     }
 
     @Transactional
-    public Mono<TxnResult> deposit(DepositRequest request, UUID txnUUID) {
+    public Mono<TxnResult> deposit(DepositRequest request, String ownerId, UUID txnUUID) {
+        var accountNumber = request.getAccountNumber();
+
+        var userAccount = accountRepo
+                .findByAccountNumber(accountNumber)
+                .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)));
+
         var existing = txnGroupRepo.findByUUID(txnUUID);
 
-        return existing.switchIfEmpty(doDeposit(request, txnUUID))
-                .flatMap(txnGroup -> fetchExisting(txnGroup, request.getAccountNumber()));
+        return existing
+                .flatMap(group -> {
+                    if (!Objects.equals(group.getReceiverAccountNumber(), accountNumber)) {
+                        return Mono.error(new BusinessLogicError("Unknown user account " + accountNumber));
+                    }
+                    return Mono.just(group);
+                })
+                .switchIfEmpty(doDeposit(request, userAccount, txnUUID))
+                .flatMap(txnGroup -> fetchExisting(txnGroup, userAccount));
     }
 
     @Transactional
-    public Mono<TxnResult> withdraw(WithdrawalRequest request, UUID txnUUID) {
-        var existing = txnGroupRepo.findByUUID(txnUUID);
-
-        return existing.switchIfEmpty(doWithdraw(request, txnUUID))
-                .flatMap(txnGroup -> fetchExisting(txnGroup, request.getAccountNumber()));
-    }
-
-    private Mono<TxnGroup> doDeposit(DepositRequest request, UUID txnUuid) {
+    public Mono<TxnResult> withdraw(WithdrawalRequest request, String ownerId, UUID txnUUID) {
         var accountNumber = request.getAccountNumber();
 
-        var existingAccount = accountRepo
+        var userAccount = accountRepo
                 .findByAccountNumber(accountNumber)
-                .filter(account -> account.getType() == AccountType.USER)
+                .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
                 .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)));
 
-        return existingAccount.flatMap(account -> {
+        var existing = txnGroupRepo.findByUUID(txnUUID);
+
+        return existing
+                .flatMap(group -> {
+                    if (!Objects.equals(group.getPayerAccountNumber(), accountNumber)) {
+                        return Mono.error(new BusinessLogicError("Unknown user account " + accountNumber));
+                    }
+                    return Mono.just(group);
+                })
+                .switchIfEmpty(doWithdraw(request, userAccount, txnUUID))
+                .flatMap(txnGroup -> fetchExisting(txnGroup, userAccount));
+    }
+
+    private Mono<TxnGroup> doDeposit(DepositRequest request, Mono<Account> userAccount, UUID txnUuid) {
+        return userAccount.flatMap(account -> {
             if (account.getCurrencyCode().equals(request.getCurrencyCode())) {
                 return depositProcessor.makeSimpleDeposit(request, txnUuid);
             } else {
@@ -94,15 +119,8 @@ public class TransferService {
         });
     }
 
-    private Mono<TxnGroup> doWithdraw(WithdrawalRequest request, UUID txnUuid) {
-        var accountNumber = request.getAccountNumber();
-
-        var existingAccount = accountRepo
-                .findByAccountNumber(accountNumber)
-                .filter(account -> account.getType() == AccountType.USER)
-                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)));
-
-        return existingAccount.flatMap(account -> {
+    private Mono<TxnGroup> doWithdraw(WithdrawalRequest request, Mono<Account> userAccount, UUID txnUuid) {
+        return userAccount.flatMap(account -> {
             if (account.getCurrencyCode().equals(request.getCurrencyCode())) {
                 return withdrawalProcessor.makeSimpleWithdrawal(request, txnUuid);
             } else {
@@ -114,16 +132,20 @@ public class TransferService {
                             }
                         })
                         .switchIfEmpty(Mono.error(new BusinessLogicError("Unsupported currency pair " + currencyPair)));
-                var fee = feeService.getExchangeFee(currencyPair, request.getAmount());
-                return Mono.zip(rate, fee).flatMap(tuple -> withdrawalProcessor.makeCrossCurrencyWithdrawal(
+                var rateAndFee = rate.zipWhen(r ->
+                        feeService.getExchangeFee(
+                                currencyPair, request.getAmount().divide(BigDecimal.valueOf(r), RoundingMode.HALF_UP)
+                        )
+                );
+                return rateAndFee.flatMap(tuple -> withdrawalProcessor.makeCrossCurrencyWithdrawal(
                         request, account.getCurrencyCode(), txnUuid, BigDecimal.valueOf(tuple.getT1()), tuple.getT2()
                 ));
             }
         });
     }
 
-    private Mono<TxnResult> fetchExisting(TxnGroup txnGroup, String accountNumber) {
-        return accountRepo.findByAccountNumber(accountNumber).flatMap(account ->
+    private Mono<TxnResult> fetchExisting(TxnGroup txnGroup, Mono<Account> userAccount) {
+        return userAccount.flatMap(account ->
                 txnRepo.findByTxnGroupIdAndAccountIdAndSpendingType(
                         txnGroup.getId(), account.getId(), TxnSpendingType.TRANSFER
                 ).map(txn -> new TxnResult(txn, account))

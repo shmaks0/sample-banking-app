@@ -1,6 +1,7 @@
 package io.shmaks.banking.repo;
 
 import io.shmaks.banking.model.Account;
+import io.shmaks.banking.model.AccountType;
 import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
@@ -43,20 +44,38 @@ public class InMemoryAccountRepo implements AccountRepo {
     }
 
     @Override
-    public Mono<List<Account>> findAllByOwnerIdOrderByAccountNumberAsc(String ownerId, int count, String afterAccountNumber) {
-        return listAccounts(count, afterAccountNumber, stream -> stream.filter(acc -> acc.getOwnerId().equals(ownerId)));
+    public Mono<List<Account>> findAllUserAccountsByOwnerIdOrderByAccountNumberAsc(String ownerId, int count, String afterAccountNumber) {
+        return listUserAccounts(
+                count, afterAccountNumber,
+                stream -> stream.filter(acc -> acc.getOwnerId().equals(ownerId) && acc.getType() == AccountType.USER)
+        );
     }
 
     @Override
-    public Mono<List<Account>> findAllOrderByAccountNumberAsc(int count, String afterAccountNumber) {
-        return listAccounts(count, afterAccountNumber, UnaryOperator.identity());
+    public Mono<List<Account>> findAllByOwnerIdOrderByAccountNumberAsc(String ownerId, int count, String afterAccountNumber) {
+        return listUserAccounts(
+                count, afterAccountNumber,
+                stream -> stream.filter(acc -> acc.getOwnerId().equals(ownerId))
+        );
     }
 
-    private Mono<List<Account>> listAccounts(int count, String afterAccountNumber, UnaryOperator<Stream<Account>> filter) {
+    @Override
+    public Mono<List<Account>> findAllUserAccountsOrderByAccountNumberAsc(int count, String afterAccountNumber) {
+        return listUserAccounts(
+                count,
+                afterAccountNumber,
+                stream -> stream.filter(acc -> acc.getType() == AccountType.USER)
+        );
+    }
+
+    private Mono<List<Account>> listUserAccounts(int count, String afterAccountNumber, UnaryOperator<Stream<Account>> filter) {
         var accounts = (afterAccountNumber == null || !accountsByNumber.containsKey(afterAccountNumber))
                 ? accountsByNumber.values() : accountsByNumber.tailMap(afterAccountNumber, false).values();
         return Mono.just(
-                filter.apply(accounts.stream().map(it -> it.account).filter(acc -> acc.getDeletedAt() == null))
+                filter.apply(accounts.stream()
+                                .map(it -> it.account)
+                                .filter(acc -> acc.getDeletedAt() == null )
+                        )
                         .limit(count)
                         .collect(Collectors.toList())
         );
@@ -88,7 +107,7 @@ public class InMemoryAccountRepo implements AccountRepo {
     @Override
     public Mono<Boolean> deleteByIdAndOwnerId(Long id, String ownerId) {
         var account = accountsById.get(id);
-        if (account == null || !account.getOwnerId().equals(ownerId)) {
+        if (account == null || !account.getOwnerId().equals(ownerId) || account.getType() != AccountType.USER) {
             return Mono.just(false);
         }
         var willBeDeleted = account.getDeletedAt() == null;

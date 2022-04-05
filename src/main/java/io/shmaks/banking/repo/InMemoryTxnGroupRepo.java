@@ -30,4 +30,8 @@ public class InMemoryTxnGroupRepo implements TxnGroupRepo {
     public Mono<TxnGroup> findByUUID(UUID txnUUID) {
         return Mono.justOrEmpty(txnGroupsByUUID.get(txnUUID));
     }
+
+    public void clear() {
+        txnGroupsByUUID.clear();
+    }
 }

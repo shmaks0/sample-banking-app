@@ -8,16 +8,16 @@ import io.shmaks.banking.config.SecurityConfig;
 import io.shmaks.banking.model.Account;
 import io.shmaks.banking.model.AccountType;
 import io.shmaks.banking.repo.InMemoryAccountRepo;
+import io.shmaks.banking.service.bookkeeping.OrgAccountsBootstrapper;
 import io.shmaks.banking.service.dto.AccountResponse;
 import io.shmaks.banking.service.dto.CreateAccountRequest;
 import org.apache.logging.log4j.util.Strings;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -31,12 +31,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-import static io.shmaks.banking.controller.TestWebFluxConfig.*;
+import static io.shmaks.banking.controller.TestHelper.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ExtendWith(SpringExtension.class)
 @WebFluxTest(AccountController.class)
-@Import({TestWebFluxConfig.class, AppConfig.class, SecurityConfig.class})
+@Import({AppConfig.class, SecurityConfig.class})
 @EnableConfigurationProperties({SampleAppProps.class, SampleAppExtProps.class})
 @TestPropertySource(properties = {
         "sample-banking-app.users[0]=" + USER_OWNER_ID,
@@ -45,9 +45,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         "sample-banking-app.privilegedClientId=" + PRIVILEGED_CLIENT_ID
 })
 public class AccountControllerTest {
-
-    @Autowired
-    ApplicationContext context;
 
     @Autowired
     ObjectMapper jackson;
@@ -59,9 +56,13 @@ public class AccountControllerTest {
     @Autowired
     WebTestClient testClient;
 
-    @BeforeEach
-    void setUp() {
+    @Autowired
+    OrgAccountsBootstrapper orgAccountsBootstrapper;
+
+    @AfterEach
+    void cleanup() {
         repo.clear();
+        orgAccountsBootstrapper.bootstrap();
     }
 
     @Test
@@ -114,8 +115,9 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isUnauthorized();
 
-        StepVerifier.create(repo.findAllOrderByAccountNumberAsc(1, null))
-                .expectNextMatches(accounts -> accounts.size() == 1);
+        StepVerifier.create(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null))
+                .expectNextMatches(List::isEmpty)
+                .verifyComplete();
 
         var responseSpec = testClient.post()
                 .uri("/accounts")
@@ -125,7 +127,7 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isCreated();
 
-        var accounts = repo.findAllOrderByAccountNumberAsc(1, null).block();
+        var accounts = repo.findAllUserAccountsOrderByAccountNumberAsc(1, null).block();
         assertThat(accounts)
                 .hasSize(1)
                 .first()
@@ -157,7 +159,7 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isCreated();
 
-        var accountId = Objects.requireNonNull(repo.findAllOrderByAccountNumberAsc(1, null).block()).get(0).getId();
+        var accountId = Objects.requireNonNull(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null).block()).get(0).getId();
 
         //try to delete by other user
         testClient
@@ -167,8 +169,9 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isNoContent();
 
-        StepVerifier.create(repo.findAllOrderByAccountNumberAsc(1, null))
-                .expectNextMatches(accounts -> accounts.size() == 1);
+        StepVerifier.create(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null))
+                .expectNextMatches(accounts -> accounts.size() == 1)
+                .verifyComplete();
 
         //try to delete by unknown user
         testClient
@@ -177,8 +180,9 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isUnauthorized();
 
-        StepVerifier.create(repo.findAllOrderByAccountNumberAsc(1, null))
-                .expectNextMatches(accounts -> accounts.size() == 1);
+        StepVerifier.create(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null))
+                .expectNextMatches(accounts -> accounts.size() == 1)
+                .verifyComplete();
 
         testClient.delete()
                 .uri("/accounts/" + accountId)
@@ -186,8 +190,9 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isNoContent();
 
-        StepVerifier.create(repo.findAllOrderByAccountNumberAsc(1, null))
-                .expectNextMatches(List::isEmpty);
+        StepVerifier.create(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null))
+                .expectNextMatches(List::isEmpty)
+                .verifyComplete();
 
         testClient.delete()
                 .uri("/accounts/" + accountId)
@@ -195,7 +200,7 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isNoContent();
 
-        assertThat(repo.getAccounts())
+        assertThat(repo.getAccounts().stream().filter(it -> it.getType() == AccountType.USER))
                 .hasSize(1)
                 .first()
                 .returns(BigDecimal.ZERO, Account::getBalance)
@@ -226,7 +231,7 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isCreated();
 
-        var accountId = Objects.requireNonNull(repo.findAllOrderByAccountNumberAsc(1, null).block()).get(0).getId();
+        var accountId = Objects.requireNonNull(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null).block()).get(0).getId();
 
         //try to get by other user
         testClient
@@ -235,9 +240,6 @@ public class AccountControllerTest {
                 .header(HttpHeaders.AUTHORIZATION, OTHER_USER_TOKEN)
                 .exchange()
                 .expectStatus().isNotFound();
-
-        StepVerifier.create(repo.findAllOrderByAccountNumberAsc(1, null))
-                .expectNextMatches(accounts -> accounts.size() == 1);
 
         //try to get by unknown user
         testClient
@@ -265,7 +267,7 @@ public class AccountControllerTest {
                 .exchange()
                 .expectStatus().isCreated();
 
-        accountId = Objects.requireNonNull(repo.findAllOrderByAccountNumberAsc(1, null).block()).get(0).getId();
+        accountId = Objects.requireNonNull(repo.findAllUserAccountsOrderByAccountNumberAsc(1, null).block()).get(0).getId();
 
         testClient.get()
                 .uri("/accounts/" + accountId + "/balance")
@@ -333,6 +335,7 @@ public class AccountControllerTest {
 
         var allAccounts = repo.getAccounts()
                 .stream()
+                .filter(it -> it.getType() == AccountType.USER)
                 .map(AccountResponse::new)
                 .collect(Collectors.toList());
 
@@ -475,6 +478,7 @@ public class AccountControllerTest {
 
         var allAccounts = repo.getAccounts()
                 .stream()
+                .filter(it -> it.getType() == AccountType.USER)
                 .map(AccountResponse::new)
                 .collect(Collectors.toList());
 

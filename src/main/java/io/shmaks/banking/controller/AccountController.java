@@ -1,6 +1,8 @@
 package io.shmaks.banking.controller;
 
+import io.shmaks.banking.model.AccountType;
 import io.shmaks.banking.service.AccountService;
+import io.shmaks.banking.service.dto.AccountResponse;
 import io.shmaks.banking.service.dto.BalanceResponse;
 import io.shmaks.banking.service.dto.CreateAccountRequest;
 import io.shmaks.banking.service.dto.Pagination;
@@ -15,6 +17,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 
 import javax.validation.constraints.Max;
+import java.util.List;
 
 @RestController
 @RequestMapping("/accounts")
@@ -29,10 +32,9 @@ public class AccountController {
         this.service = service;
     }
 
-    @SuppressWarnings("rawtypes")
     @PreAuthorize("hasRole('USER')")
     @PostMapping
-    public Mono<ResponseEntity> createAccount(
+    public Mono<ResponseEntity<Object>> createAccount(
             @RequestBody @Validated CreateAccountRequest request,
             @AuthenticationPrincipal String ownerId,
             UriComponentsBuilder componentsBuilder
@@ -44,10 +46,9 @@ public class AccountController {
                 ).build());
     }
 
-    @SuppressWarnings("rawtypes")
     @PreAuthorize("hasRole('USER')")
     @DeleteMapping("/{id}")
-    public Mono<ResponseEntity> deleteAccount(@PathVariable("id") Long id, @AuthenticationPrincipal String ownerId) {
+    public Mono<ResponseEntity<Object>> deleteAccount(@PathVariable("id") Long id, @AuthenticationPrincipal String ownerId) {
         log.info("deleting account: ownerId={}, id={}", ownerId, id);
         return service.deleteById(id, ownerId)
                 //.doOnNext() // logging & metrics
@@ -61,7 +62,7 @@ public class AccountController {
         log.info("get balance: ownerId={}, id={}", ownerId, id);
         return service.findById(id)
                 .handle((account, sink) -> {
-                    if (account.getOwnerId().equals(ownerId)) { // metrics & logging
+                    if (account.getOwnerId().equals(ownerId) && account.getType() == AccountType.USER) { // metrics & logging
                         sink.next(ResponseEntity.ok(new BalanceResponse(account.getBalance())));
                     }
                 })
@@ -69,28 +70,26 @@ public class AccountController {
                 .switchIfEmpty(Mono.just(ResponseEntity.notFound().build()));
     }
 
-    @SuppressWarnings("rawtypes")
     @PreAuthorize("hasRole('USER')")
     @GetMapping
-    public Mono<ResponseEntity> listAccounts(
+    public Mono<ResponseEntity<List<AccountResponse>>> listAccounts(
             @AuthenticationPrincipal String ownerId,
             @RequestParam(required = false) @Max(20) Integer count,
             @RequestParam(required = false) String after) {
         log.info("list accounts: ownerId={}, count={}, after={}", ownerId, count, after);
         var pagination = new Pagination<>(count != null ? count : 10, after);
 
-        return service.findAccounts(ownerId, pagination).map(ResponseEntity::ok);
+        return service.findUserAccounts(ownerId, pagination).map(ResponseEntity::ok);
     }
 
-    @SuppressWarnings("rawtypes")
     @PreAuthorize("hasRole('ADMIN')")
     @GetMapping("/all")
-    public Mono<ResponseEntity> listAllAccounts(
+    public Mono<ResponseEntity<List<AccountResponse>>> listAllAccounts(
             @RequestParam(required = false) @Max(50) Integer count,
             @RequestParam(required = false) String after) {
         log.info("list accounts by admin: count={}, after={}", count, after);
         var pagination = new Pagination<>(count != null ? count : 10, after);
 
-        return service.findAllAccounts(pagination).map(ResponseEntity::ok);
+        return service.findAllUserAccounts(pagination).map(ResponseEntity::ok);
     }
 }

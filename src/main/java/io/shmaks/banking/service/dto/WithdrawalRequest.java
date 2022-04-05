@@ -31,7 +31,7 @@ public class WithdrawalRequest extends MoneyRequest {
     @Override
     @JsonIgnore
     public String getPayerAccountNumber() {
-        return null;
+        return accountNumber;
     }
 
     @Override

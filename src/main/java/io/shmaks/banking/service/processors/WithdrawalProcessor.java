@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple3;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Set;
 import java.util.UUID;
 
@@ -33,7 +34,7 @@ public class WithdrawalProcessor extends BaseProcessor {
                             }
 
                             var orgAccount = handle.getAccounts().get(baseAcc.getAccountNumber());
-                            return createGroup(request, txnUUID)
+                            return createGroup(request, txnUUID, TxnType.WITHDRAWAL)
                                     .flatMap(group -> performTransfer(
                                             group, TxnSpendingType.TRANSFER,
                                             orgAccount, customerAccount,
@@ -80,7 +81,8 @@ public class WithdrawalProcessor extends BaseProcessor {
         var baseForUser = handle.getAccounts().get(orgAccounts.getT3().getAccountNumber());
         var customerAccount = handle.getAccounts().get(request.getAccountNumber());
 
-        var withdrawnAmount = request.getAmount().multiply(rate).add(fee);
+        var forExchange = request.getAmount().divide(rate, RoundingMode.HALF_UP);
+        var withdrawnAmount = forExchange.add(fee);
 
         if (customerAccount.getBalance().compareTo(withdrawnAmount) < 0) {
             return Mono.error(new BusinessLogicError("Insufficient funds")); // todo: return failed transaction
@@ -91,7 +93,7 @@ public class WithdrawalProcessor extends BaseProcessor {
         var userComment = "Withdrawal: " + request.getComment();
         var baseDebitComment = "Withdrawal from " + request.getAccountNumber() + ": " + txnUUID;
 
-        return createGroup(request, txnUUID)
+        return createGroup(request, txnUUID, TxnType.WITHDRAWAL)
                 .flatMap(group ->
                         performTransfer(
                                 group, TxnSpendingType.TRANSFER,
@@ -108,7 +110,7 @@ public class WithdrawalProcessor extends BaseProcessor {
                                 .then(performTransfer(
                                         group, TxnSpendingType.EXCHANGE,
                                         baseForRequest, baseForUser,
-                                        request.getAmount(), request.getAmount().multiply(rate).negate(),
+                                        request.getAmount(), forExchange.negate(),
                                         exchangeComment, exchangeComment
                                 ))
                                 .thenReturn(group)

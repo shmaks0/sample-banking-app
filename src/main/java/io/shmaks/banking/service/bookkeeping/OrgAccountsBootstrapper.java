@@ -28,8 +28,8 @@ public class OrgAccountsBootstrapper {
         this.accountRepo = accountRepo;
     }
 
-    public Mono<Void> bootstrap() {
-        return currencyService.supportedCurrencies()
+    public void bootstrap() {
+        currencyService.supportedCurrencies()
                 .flatMap(currencies ->
                         Mono.when(currencies.stream().map(currency ->
                             Mono.zip(
@@ -37,7 +37,7 @@ public class OrgAccountsBootstrapper {
                                     accountRepo.create(feeAccount(currency))
                             )
                         ).collect(Collectors.toList()))
-                );
+                ).block();
     }
 
     private Account baseAccount(String currencyCode) {

@@ -3,6 +3,7 @@ package io.shmaks.banking.service.dto;
 import io.shmaks.banking.model.*;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 
 public class TxnResult {
 
@@ -68,5 +69,18 @@ public class TxnResult {
 
     public void setCreatedAt(String createdAt) {
         this.createdAt = createdAt;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        TxnResult txnResult = (TxnResult) o;
+        return Objects.equals(txnId, txnResult.txnId) && Objects.equals(accountId, txnResult.accountId) && Objects.equals(amount, txnResult.amount) && Objects.equals(currencyCode, txnResult.currencyCode) && status == txnResult.status && Objects.equals(createdAt, txnResult.createdAt);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(txnId, accountId, amount, currencyCode, status, createdAt);
     }
 }

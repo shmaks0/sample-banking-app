@@ -1,5 +1,5 @@
 package io.shmaks.banking.model;
 
 public enum TxnType {
-    DEBIT, CREDIT, TRANSFER, INTER_TRANSFER
+    DEPOSIT, WITHDRAWAL, TRANSFER, INTER_TRANSFER
 }

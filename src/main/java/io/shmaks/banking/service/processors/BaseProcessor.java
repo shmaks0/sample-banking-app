@@ -70,7 +70,7 @@ abstract class BaseProcessor {
                 .then();
     }
 
-    Mono<TxnGroup> createGroup(MoneyRequest request, UUID txnUUID) {
+    Mono<TxnGroup> createGroup(MoneyRequest request, UUID txnUUID, TxnType type) {
         var txnGroup = new TxnGroup();
         txnGroup.setTxnUUID(txnUUID);
         txnGroup.setAmount(request.getAmount());
@@ -78,6 +78,7 @@ abstract class BaseProcessor {
         txnGroup.setComment(request.getComment());
         txnGroup.setReceiverAccountNumber(request.getReceiverAccountNumber());
         txnGroup.setPayerAccountNumber(request.getPayerAccountNumber());
+        txnGroup.setType(type);
         return txnGroupRepo.merge(txnGroup).map(TxnGroupRepo.CreationResult::getTxnGroup);
     }
 }

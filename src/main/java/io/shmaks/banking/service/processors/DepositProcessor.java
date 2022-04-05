@@ -27,7 +27,7 @@ public class DepositProcessor extends BaseProcessor {
                         try (handle) {
                             var customerAccount = handle.getAccounts().get(request.getAccountNumber());
                             var orgAccount = handle.getAccounts().get(baseAcc.getAccountNumber());
-                            return createGroup(request, txnUUID)
+                            return createGroup(request, txnUUID, TxnType.DEPOSIT)
                                     .flatMap(group -> performTransfer(
                                             group, TxnSpendingType.TRANSFER,
                                             customerAccount, orgAccount,
@@ -83,7 +83,7 @@ public class DepositProcessor extends BaseProcessor {
                 .subtract(fee)
                 .multiply(rate);
 
-        return createGroup(request, txnUUID)
+        return createGroup(request, txnUUID, TxnType.DEPOSIT)
                 .flatMap(group ->
                         performTransfer(
                                 group, TxnSpendingType.EXCHANGE_FEE,

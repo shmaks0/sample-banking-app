@@ -46,8 +46,8 @@ abstract public class MoneyRequest {
 
     @Override
     public String toString() {
-        return "DepositRequest{" +
-                ", amount=" + amount +
+        return "MoneyRequest{" +
+                "amount=" + amount +
                 ", currencyCode='" + currencyCode + '\'' +
                 ", comment='" + comment + '\'' +
                 '}';
