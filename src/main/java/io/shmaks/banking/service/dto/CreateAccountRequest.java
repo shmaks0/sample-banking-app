@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.validation.annotation.Validated;
 
 import javax.validation.constraints.Min;
+import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Size;
 import java.math.BigDecimal;
 
@@ -12,6 +13,7 @@ import java.math.BigDecimal;
 public class CreateAccountRequest {
     @Min(0)
     private final BigDecimal initialBalance;
+    @NotBlank
     private final String currencyCode;
     @Size(max = 256)
     private final String displayedName;

@@ -39,6 +39,10 @@ public class MockCurrencyService implements CurrencyService {
         return Mono.just(result);
     }
 
+    public Mono<Collection<String>> supportedCurrencies() {
+        return Mono.just(rates.keySet());
+    }
+
     private static class Pair<T1, T2> {
         private final T1 first;
         private final T2 second;
