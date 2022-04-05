@@ -20,7 +20,7 @@ public class SampleAppExtProps {
     private final Set<CurrenciesExchangeRate> currenciesExchangeRates;
 
     public SampleAppExtProps(Set<CurrenciesExchangeRate> currenciesExchangeRates) {
-        this.currenciesExchangeRates = currenciesExchangeRates;
+        this.currenciesExchangeRates = currenciesExchangeRates != null ? currenciesExchangeRates : DEFAULT.currenciesExchangeRates;
     }
 
     public Set<CurrenciesExchangeRate> getCurrenciesExchangeRates() {

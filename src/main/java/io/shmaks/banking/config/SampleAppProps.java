@@ -34,4 +34,13 @@ public class SampleAppProps {
     public String getPrivilegedClientId() {
         return privilegedClientId;
     }
+
+    @Override
+    public String toString() {
+        return "SampleAppProps{" +
+                "users=" + users +
+                ", admin='" + admin + '\'' +
+                ", privilegedClientId='" + privilegedClientId + '\'' +
+                '}';
+    }
 }

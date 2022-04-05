@@ -12,7 +12,7 @@ public class AccountResponse {
     private String currencyCode;
     private String displayedName;
     private Long lastTxnId;
-    private Instant createdAt;
+    private String createdAt;
 
     public AccountResponse(Account account) {
         this.id = account.getId();
@@ -21,7 +21,7 @@ public class AccountResponse {
         this.currencyCode = account.getCurrencyCode();
         this.displayedName = account.getDisplayedName();
         this.lastTxnId = account.getLastTxnId();
-        this.createdAt = account.getCreatedAt();
+        this.createdAt = account.getCreatedAt().toString();
     }
 
     public Long getId() {
@@ -72,11 +72,11 @@ public class AccountResponse {
         this.lastTxnId = lastTxnId;
     }
 
-    public Instant getCreatedAt() {
+    public String getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(Instant createdAt) {
+    public void setCreatedAt(String createdAt) {
         this.createdAt = createdAt;
     }
 }

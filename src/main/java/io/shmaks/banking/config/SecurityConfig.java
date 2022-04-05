@@ -1,10 +1,10 @@
 package io.shmaks.banking.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
-import org.springframework.security.authentication.ReactiveAuthenticationManager;
-import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -24,9 +24,11 @@ import java.util.Collection;
 import java.util.Set;
 
 @Configuration
-@EnableGlobalMethodSecurity
 @EnableWebFluxSecurity
+@EnableReactiveMethodSecurity
 public class SecurityConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
     private final SampleAppProps appProps;
 
@@ -35,26 +37,18 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
-        http.httpBasic().disable();
+    public SecurityWebFilterChain securityWebFilterChain(
+            ServerHttpSecurity http,
+            ServerSecurityContextRepository serverSecurityContextRepository) {
         http.formLogin().disable();
         http.csrf().disable();
         http.logout().disable();
+        http.httpBasic().disable();
+        http.securityContextRepository(serverSecurityContextRepository);
 
         return http.authorizeExchange()
                 .anyExchange().authenticated()
                 .and().build();
-    }
-
-    @Bean
-    public ReactiveAuthenticationManager authManager() {
-        return authentication -> {
-            if (authentication.isAuthenticated()) {
-                return Mono.just(authentication);
-            } else {
-                return Mono.error(new UsernameNotFoundException("User not found"));
-            }
-        };
     }
 
     @Bean
@@ -70,30 +64,36 @@ public class SecurityConfig {
             public Mono<SecurityContext> load(ServerWebExchange exchange) {
                 var authHeader = exchange.getRequest().getHeaders().get(HttpHeaders.AUTHORIZATION);
                 if (authHeader == null || authHeader.size() != 1 || !authHeader.get(0).startsWith("Dummy ")) {
-                    return Mono.error(new AuthenticationCredentialsNotFoundException("No authentication"));
+                    log.error("No header or non dummy: {}", authHeader);
+                    return Mono.empty();
                 }
 
                 var decodedToken = new String(Base64.getDecoder().decode(authHeader.get(0).substring("Dummy ".length())));
                 var split = decodedToken.split("_");
                 if (split.length != 2) {
-                    return  Mono.error(new AuthenticationCredentialsNotFoundException("Bad authentication"));
+                    log.error("Bad header: {}, decoded={}", authHeader, decodedToken);
+                    return Mono.empty();
                 }
 
+                log.trace("Authentication: decodedHeader={}, appProps={}", decodedToken, appProps);
                 if (appProps.getPrivilegedClientId().equals(split[0]) && appProps.getAdmin().equals(split[1])) {
+                    log.debug("authenticated as admin");
                     return Mono.just(new SecurityContextImpl(DummyAuthenticationToken.adminToken(split[0], split[1])));
                 } else if (appProps.getUsers().contains(split[1])) {
+                    log.debug("authenticated as user");
                     return Mono.just(new SecurityContextImpl(DummyAuthenticationToken.userToken(split[0], split[1])));
                 } else {
+                    log.debug("non-authenticated");
                     return Mono.just(new SecurityContextImpl(DummyAuthenticationToken.unknown(split[0], split[1])));
                 }
             }
         };
     }
 
-    private static class DummyAuthenticationToken extends PreAuthenticatedAuthenticationToken {
+    public static class DummyAuthenticationToken extends PreAuthenticatedAuthenticationToken {
 
-        private static final GrantedAuthority USER = new SimpleGrantedAuthority("USER");
-        private static final GrantedAuthority ADMIN = new SimpleGrantedAuthority("ADMIN");
+        private static final GrantedAuthority USER = new SimpleGrantedAuthority("ROLE_USER");
+        private static final GrantedAuthority ADMIN = new SimpleGrantedAuthority("ROLE_ADMIN");
 
         private DummyAuthenticationToken(Object aPrincipal, Object aCredentials) {
             super(aPrincipal, aCredentials);
@@ -113,6 +113,13 @@ public class SecurityConfig {
 
         public static DummyAuthenticationToken unknown(String clientId, String ownerId) {
             return new DummyAuthenticationToken(ownerId, clientId);
+        }
+
+        @Override
+        public String toString() {
+            return "DummyAuthenticationToken{" +
+                    "principal=" + getPrincipal() + ",creds=" + getCredentials() + ",auth=" + getAuthorities() +
+                    "}";
         }
     }
 }

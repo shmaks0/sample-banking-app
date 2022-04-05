@@ -4,6 +4,7 @@ import io.shmaks.banking.model.Account;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -42,7 +43,7 @@ public class InMemoryAccountRepo implements AccountRepo {
     }
 
     private Mono<List<Account>> listAccounts(int count, String afterAccountNumber, UnaryOperator<Stream<Account>> filter) {
-        var accounts = afterAccountNumber == null
+        var accounts = (afterAccountNumber == null || !accountsByNumber.containsKey(afterAccountNumber))
                 ? accountsByNumber.values() : accountsByNumber.tailMap(afterAccountNumber, false).values();
         return Mono.just(
                 filter.apply(accounts.stream().filter(acc -> acc.getDeletedAt() == null))
@@ -73,5 +74,14 @@ public class InMemoryAccountRepo implements AccountRepo {
             account.setDeletedAt(Instant.now());
         }
         return Mono.just(willBeDeleted);
+    }
+
+    public void clear() {
+        accountsById.clear();
+        accountsByNumber.clear();
+    }
+
+    public Collection<Account> getAccounts() {
+        return accountsByNumber.values();
     }
 }
