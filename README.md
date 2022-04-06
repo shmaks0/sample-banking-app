@@ -1,6 +1,6 @@
 # sample-banking-app
 
-##todo:
+## todo:
 - Documentation
 - Caching
 - Tests Refactoring
