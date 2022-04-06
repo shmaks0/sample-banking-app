@@ -12,6 +12,7 @@ import io.shmaks.banking.repo.InMemoryAccountRepo;
 import io.shmaks.banking.repo.InMemoryTxnGroupRepo;
 import io.shmaks.banking.repo.InMemoryTxnRepo;
 import io.shmaks.banking.service.AccountService;
+import io.shmaks.banking.service.bookkeeping.CorrespondentAccountsBootstrapper;
 import io.shmaks.banking.service.bookkeeping.OrgAccountsBootstrapper;
 import io.shmaks.banking.service.dto.*;
 import org.junit.jupiter.api.AfterEach;
@@ -95,6 +96,9 @@ public class TransferControllerTest {
     OrgAccountsBootstrapper orgAccountsBootstrapper;
 
     @Autowired
+    CorrespondentAccountsBootstrapper correspondentAccountsBootstrapper;
+
+    @Autowired
     AccountService accountService;
 
     @Autowired
@@ -106,6 +110,7 @@ public class TransferControllerTest {
         txnRepo.clear();
         txnGroupRepo.clear();
         orgAccountsBootstrapper.bootstrap();
+        correspondentAccountsBootstrapper.bootstrap();
     }
 
     @Test

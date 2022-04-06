@@ -9,8 +9,8 @@ public class TestHelper {
     static final String ADMIN_OWNER_ID = "admin";
     static final String PRIVILEGED_CLIENT_ID = "REPORTING";
 
-    static final String USER_TOKEN = "Dummy " + Base64.getEncoder().encodeToString(("someClientId_" + USER_OWNER_ID).getBytes());
-    static final String OTHER_USER_TOKEN = "Dummy " + Base64.getEncoder().encodeToString(("someClientId_" + OTHER_OWNER_ID).getBytes());
-    static final String ADMIN_TOKEN = "Dummy " + Base64.getEncoder().encodeToString((PRIVILEGED_CLIENT_ID + "_" + ADMIN_OWNER_ID).getBytes());
+    static final String USER_TOKEN = "Basic " + Base64.getEncoder().encodeToString(("someClientId:" + USER_OWNER_ID).getBytes());
+    static final String OTHER_USER_TOKEN = "Basic " + Base64.getEncoder().encodeToString(("someClientId:" + OTHER_OWNER_ID).getBytes());
+    static final String ADMIN_TOKEN = "Basic " + Base64.getEncoder().encodeToString((PRIVILEGED_CLIENT_ID + ":" + ADMIN_OWNER_ID).getBytes());
 
 }

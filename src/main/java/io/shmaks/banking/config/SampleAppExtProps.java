@@ -14,17 +14,24 @@ public class SampleAppExtProps {
                     new CurrenciesExchangeRate("USD", "AED", 3.67, 0.27),
                     new CurrenciesExchangeRate("EUR", "AED", 4.03, 0.25),
                     new CurrenciesExchangeRate("EUR", "USD", 1.1, 0.91)
-            )
+            ),
+            Set.of("DB", "JPM")
     );
 
     private final Set<CurrenciesExchangeRate> currenciesExchangeRates;
+    private final Set<String> correspondentOwners;
 
-    public SampleAppExtProps(Set<CurrenciesExchangeRate> currenciesExchangeRates) {
+    public SampleAppExtProps(Set<CurrenciesExchangeRate> currenciesExchangeRates, Set<String> correspondentOwners) {
         this.currenciesExchangeRates = currenciesExchangeRates != null ? currenciesExchangeRates : DEFAULT.currenciesExchangeRates;
+        this.correspondentOwners = correspondentOwners != null ? correspondentOwners : DEFAULT.correspondentOwners;
     }
 
     public Set<CurrenciesExchangeRate> getCurrenciesExchangeRates() {
         return currenciesExchangeRates;
+    }
+
+    public Set<String> getCorrespondentOwners() {
+        return correspondentOwners;
     }
 
     @ConstructorBinding

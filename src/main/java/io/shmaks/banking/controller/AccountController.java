@@ -6,6 +6,7 @@ import io.shmaks.banking.service.dto.AccountResponse;
 import io.shmaks.banking.service.dto.BalanceResponse;
 import io.shmaks.banking.service.dto.CreateAccountRequest;
 import io.shmaks.banking.service.dto.Pagination;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/accounts")
 @Validated
+@SecurityRequirement(name = "basicAuth")
 public class AccountController {
 
     private static final Logger log = LoggerFactory.getLogger(AccountController.class);

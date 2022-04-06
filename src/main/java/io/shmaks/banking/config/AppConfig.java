@@ -9,6 +9,7 @@ import io.shmaks.banking.service.AccountNumberGenerator;
 import io.shmaks.banking.service.AccountService;
 import io.shmaks.banking.service.SimpleAccountNumberGenerator;
 import io.shmaks.banking.service.TransferService;
+import io.shmaks.banking.service.bookkeeping.CorrespondentAccountsBootstrapper;
 import io.shmaks.banking.service.bookkeeping.OrgAccountsBootstrapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -78,5 +79,13 @@ public class AppConfig {
             AccountNumberGenerator accountNumberGenerator,
             AccountRepo repo) {
         return new OrgAccountsBootstrapper(currencyService, accountNumberGenerator, repo);
+    }
+
+    @Bean(initMethod = "bootstrap")
+    public CorrespondentAccountsBootstrapper correspondentAccountsBootstrapper(
+            MockCurrencyService currencyService,
+            AccountNumberGenerator accountNumberGenerator,
+            AccountRepo repo) {
+        return new CorrespondentAccountsBootstrapper(currencyService, accountNumberGenerator, repo, extProps);
     }
 }

@@ -36,6 +36,21 @@ public class SecurityConfig {
         this.appProps = appProps;
     }
 
+    private static final String[] AUTH_WHITELIST = {
+            // -- Swagger UI v2
+            "/v2/api-docs",
+            "/swagger-resources",
+            "/swagger-resources/**",
+            "/configuration/ui",
+            "/configuration/security",
+            "/swagger-ui.html",
+            "/webjars/**",
+            // -- Swagger UI v3 (OpenAPI)
+            "/v3/api-docs/**",
+            "/swagger-ui/**"
+            // other public endpoints of your API may be appended to this array
+    };
+
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(
             ServerHttpSecurity http,
@@ -47,6 +62,7 @@ public class SecurityConfig {
         http.securityContextRepository(serverSecurityContextRepository);
 
         return http.authorizeExchange()
+                .pathMatchers(AUTH_WHITELIST).permitAll()
                 .anyExchange().authenticated()
                 .and().build();
     }
@@ -63,13 +79,13 @@ public class SecurityConfig {
             @Override
             public Mono<SecurityContext> load(ServerWebExchange exchange) {
                 var authHeader = exchange.getRequest().getHeaders().get(HttpHeaders.AUTHORIZATION);
-                if (authHeader == null || authHeader.size() != 1 || !authHeader.get(0).startsWith("Dummy ")) {
+                if (authHeader == null || authHeader.size() != 1 || !authHeader.get(0).startsWith("Basic ")) {
                     log.error("No header or non dummy: {}", authHeader);
                     return Mono.empty();
                 }
 
-                var decodedToken = new String(Base64.getDecoder().decode(authHeader.get(0).substring("Dummy ".length())));
-                var split = decodedToken.split("_");
+                var decodedToken = new String(Base64.getDecoder().decode(authHeader.get(0).substring("Basic ".length())));
+                var split = decodedToken.split(":");
                 if (split.length != 2) {
                     log.error("Bad header: {}, decoded={}", authHeader, decodedToken);
                     return Mono.empty();

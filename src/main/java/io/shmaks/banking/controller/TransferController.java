@@ -2,6 +2,7 @@ package io.shmaks.banking.controller;
 
 import io.shmaks.banking.service.TransferService;
 import io.shmaks.banking.service.dto.*;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +17,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/transfer")
 @Validated
+@SecurityRequirement(name = "basicAuth")
 public class TransferController {
 
     private static final Logger log = LoggerFactory.getLogger(TransferController.class);

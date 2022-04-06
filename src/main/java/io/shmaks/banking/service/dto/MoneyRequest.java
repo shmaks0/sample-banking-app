@@ -3,12 +3,14 @@ package io.shmaks.banking.service.dto;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Positive;
 import javax.validation.constraints.Size;
 import java.math.BigDecimal;
 
 abstract public class MoneyRequest {
     @Positive
+    @NotNull
     private final BigDecimal amount;
     @Size(max = 256)
     private final String comment;

@@ -8,6 +8,7 @@ import io.shmaks.banking.config.SecurityConfig;
 import io.shmaks.banking.model.Account;
 import io.shmaks.banking.model.AccountType;
 import io.shmaks.banking.repo.InMemoryAccountRepo;
+import io.shmaks.banking.service.bookkeeping.CorrespondentAccountsBootstrapper;
 import io.shmaks.banking.service.bookkeeping.OrgAccountsBootstrapper;
 import io.shmaks.banking.service.dto.AccountResponse;
 import io.shmaks.banking.service.dto.CreateAccountRequest;
@@ -59,10 +60,14 @@ public class AccountControllerTest {
     @Autowired
     OrgAccountsBootstrapper orgAccountsBootstrapper;
 
+    @Autowired
+    CorrespondentAccountsBootstrapper correspondentAccountsBootstrapper;
+
     @AfterEach
     void cleanup() {
         repo.clear();
         orgAccountsBootstrapper.bootstrap();
+        correspondentAccountsBootstrapper.bootstrap();
     }
 
     @Test
