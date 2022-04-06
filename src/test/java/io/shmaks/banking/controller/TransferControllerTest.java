@@ -32,10 +32,7 @@ import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
@@ -64,6 +61,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "sample-banking-app.ext.currenciesExchangeRates[2].to=EUR",
         "sample-banking-app.ext.currenciesExchangeRates[2].rate=" + USD_2_EUR,
         "sample-banking-app.ext.currenciesExchangeRates[2].reverseRate=" + EUR_2_USD,
+        "sample-banking-app.ext.correspondentOwners[0]=" + SBERBANK,
+        "sample-banking-app.ext.correspondentOwners[1]=" + BARCLAYS,
 })
 public class TransferControllerTest {
 
@@ -73,6 +72,9 @@ public class TransferControllerTest {
     static final double EUR_2_AED = 9;
     static final double USD_2_EUR = 0.5;
     static final double EUR_2_USD = 1.5;
+
+    static final String SBERBANK = "SBER";
+    static final String BARCLAYS = "BARC";
 
     @Autowired
     ObjectMapper jackson;
@@ -634,6 +636,17 @@ public class TransferControllerTest {
                 .exchange()
                 .expectStatus().isBadRequest();
 
+        var sberAedNumber = getOrgAccount("AED", AccountType.CORRESPONDENT, SBERBANK).getAccountNumber();
+        var alice2SberTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), sberAedNumber, BigDecimal.valueOf(10), "alice2alice");
+        testClient.put()
+                .uri("/transfer/" + txnUuid)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2SberTransfer)
+                .exchange()
+                .expectStatus().isBadRequest();
+
         var bobAccount = Objects.requireNonNull(accountService.create(OTHER_OWNER_ID, bobAccountRequest).block());
         var bob2AliceTransfer = new TransferRequest(
                 bobAccount.getAccountNumber(), aliceAccount.getAccountNumber(), BigDecimal.valueOf(60.35), "bob2alice");
@@ -860,5 +873,166 @@ public class TransferControllerTest {
                 .isLessThan(balanceByAccNumber.get(aliceAccount.getAccountNumber()));
         assertThat(newBalancesByNumber.get(bobAccount.getAccountNumber()))
                 .isGreaterThan(balanceByAccNumber.get(bobAccount.getAccountNumber()));
+    }
+
+    @Test
+    void sameCurrencyInterTransfer() {
+
+        var aliceAccountRequest = new CreateAccountRequest(BigDecimal.valueOf(100), "AED", null);
+        var aliceAccount = Objects.requireNonNull(accountService.create(USER_OWNER_ID, aliceAccountRequest).block());
+        var sberAedNumber = getOrgAccount("AED", AccountType.CORRESPONDENT, SBERBANK).getAccountNumber();
+        var alice2sberTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), sberAedNumber, BigDecimal.valueOf(60), "alice2sber");
+        var txntUuid = UUID.randomUUID();
+
+        var balanceByAccNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+
+        testClient.put()
+                .uri("/transfer/international/" + txntUuid)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2sberTransfer)
+                .exchange()
+                .expectStatus().isOk().expectBody()
+                .jsonPath("accountId").isEqualTo(aliceAccount.getId())
+                .jsonPath("amount").isEqualTo(alice2sberTransfer.getAmount().negate());
+
+        assertThat(Objects.requireNonNull(accountRepo.findById(aliceAccount.getId()).block()).getLastTxnId()).isNotNull();
+
+        var txnGroup = txnGroupRepo.findByUUID(txntUuid).block();
+        assertThat(txnGroup).isNotNull()
+                .returns(alice2sberTransfer.getAmount(), TxnGroup::getAmount)
+                .returns("AED", TxnGroup::getCurrencyCode)
+                .returns(TxnType.INTER_TRANSFER, TxnGroup::getType)
+                .returns(alice2sberTransfer.getComment(), TxnGroup::getComment)
+                .returns(aliceAccount.getAccountNumber(), TxnGroup::getPayerAccountNumber)
+                .returns(sberAedNumber, TxnGroup::getReceiverAccountNumber)
+                .returns(txntUuid, TxnGroup::getTxnUUID)
+                .matches(txn -> txn.getCreatedAt() != null);
+
+        var delta = alice2sberTransfer.getAmount();
+        var fee = feeService.getInternationalFee("AED", delta).block();
+
+        var aliceTxn = txnRepo.findByTxnGroupIdAndAccountIdAndSpendingType(
+                txnGroup.getId(), aliceAccount.getId(), TxnSpendingType.TRANSFER
+        ).block();
+        var sberTxn = txnRepo.findById(Objects.requireNonNull(accountRepo.findByAccountNumber(sberAedNumber).block()).getLastTxnId());
+        assertThat(aliceTxn).isNotNull()
+                .returns(aliceAccount.getId(), Txn::getAccountId)
+                .returns(delta.negate(), Txn::getAmount)
+                .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                .matches(t -> t.getCreatedAt() != null && t.getDetails() != null);
+        assertThat(sberTxn).isNotNull()
+                .returns(delta.subtract(fee), Txn::getAmount)
+                .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                .matches(txn -> !txn.getLinkingTxnId().equals(aliceTxn.getId()));
+
+        var newBalancesByNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                .isEqualTo(balanceByAccNumber.get(aliceAccount.getAccountNumber()).subtract(delta));
+        assertThat(newBalancesByNumber.get(sberAedNumber))
+                .isEqualTo(balanceByAccNumber.get(sberAedNumber).add(delta).subtract(fee));
+
+        testClient.put()
+                .uri("/transfer/international/" + UUID.randomUUID())
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2sberTransfer)
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        var lastOne = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        assertThat(lastOne).allSatisfy((other, amount) ->
+                assertThat(newBalancesByNumber.get(other)).isEqualByComparingTo(amount)
+        );
+    }
+
+    @Test
+    void otherCurrencyInternationalTransfer() {
+
+        var aliceAccountRequest = new CreateAccountRequest(BigDecimal.valueOf(100), "AED", null);
+        var aliceAccount = Objects.requireNonNull(accountService.create(USER_OWNER_ID, aliceAccountRequest).block());
+        var sberUsdNumber = getOrgAccount("USD", AccountType.CORRESPONDENT, SBERBANK).getAccountNumber();
+        var alice2sberTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), sberUsdNumber, BigDecimal.valueOf(60), "alice2sber");
+        var txntUuid = UUID.randomUUID();
+
+        var balanceByAccNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+
+        testClient.put()
+                .uri("/transfer/international/" + txntUuid)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2sberTransfer)
+                .exchange()
+                .expectStatus().isOk().expectBody()
+                .jsonPath("accountId").isEqualTo(aliceAccount.getId())
+                .jsonPath("amount").isEqualTo(alice2sberTransfer.getAmount().negate());
+
+        assertThat(Objects.requireNonNull(accountRepo.findById(aliceAccount.getId()).block()).getLastTxnId()).isNotNull();
+
+        var txnGroup = txnGroupRepo.findByUUID(txntUuid).block();
+        assertThat(txnGroup).isNotNull()
+                .returns(alice2sberTransfer.getAmount(), TxnGroup::getAmount)
+                .returns("AED", TxnGroup::getCurrencyCode)
+                .returns(TxnType.INTER_TRANSFER, TxnGroup::getType)
+                .returns(alice2sberTransfer.getComment(), TxnGroup::getComment)
+                .returns(aliceAccount.getAccountNumber(), TxnGroup::getPayerAccountNumber)
+                .returns(sberUsdNumber, TxnGroup::getReceiverAccountNumber)
+                .returns(txntUuid, TxnGroup::getTxnUUID)
+                .matches(txn -> txn.getCreatedAt() != null);
+
+        var delta = alice2sberTransfer.getAmount();
+        var exchangeFee = feeService.getExchangeFee(new CurrencyPair("AED", "USD"), delta).block();
+        var bought = delta.subtract(exchangeFee).multiply(BigDecimal.valueOf(AED_2_USD));
+        var fee = feeService.getInternationalFee("USD", bought).block();
+        var deposited = bought.subtract(fee);
+
+        var aliceTxn = txnRepo.findByTxnGroupIdAndAccountIdAndSpendingType(
+                txnGroup.getId(), aliceAccount.getId(), TxnSpendingType.TRANSFER
+        ).block();
+        var sberTxn = txnRepo.findById(Objects.requireNonNull(accountRepo.findByAccountNumber(sberUsdNumber).block()).getLastTxnId());
+        assertThat(aliceTxn).isNotNull()
+                .returns(aliceAccount.getId(), Txn::getAccountId)
+                .returns(delta.negate(), Txn::getAmount)
+                .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                .matches(t -> t.getCreatedAt() != null && t.getDetails() != null);
+        assertThat(sberTxn).isNotNull()
+                .returns(deposited, Txn::getAmount)
+                .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                .matches(txn -> !txn.getLinkingTxnId().equals(aliceTxn.getId()));
+
+        var newBalancesByNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                .isEqualTo(balanceByAccNumber.get(aliceAccount.getAccountNumber()).subtract(delta));
+        assertThat(newBalancesByNumber.get(sberUsdNumber))
+                .isEqualTo(balanceByAccNumber.get(sberUsdNumber).add(deposited));
+
+        testClient.put()
+                .uri("/transfer/international/" + UUID.randomUUID())
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2sberTransfer)
+                .exchange()
+                .expectStatus().isBadRequest();
+
+        var lastOne = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        assertThat(lastOne).allSatisfy((other, amount) ->
+                assertThat(newBalancesByNumber.get(other)).isEqualByComparingTo(amount)
+        );
+    }
+
+    private Account getOrgAccount(String currencyCode, AccountType type, String ownerId) {
+        return accountRepo.getAccounts()
+                .stream()
+                .filter(acc -> acc.getCurrencyCode().equals(currencyCode) && acc.getType() == type && acc.getOwnerId().equals(ownerId))
+                .findFirst()
+                .orElse(null);
     }
 }
