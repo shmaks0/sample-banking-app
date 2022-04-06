@@ -1,7 +1,6 @@
 # sample-banking-app
 
 ##todo:
-- International Transfer
 - Documentation
 - Caching
 - Tests Refactoring
