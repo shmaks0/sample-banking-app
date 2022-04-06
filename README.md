@@ -13,7 +13,8 @@ It provides following functionality:
 
 ## Endpoints
 
-1) Creating account: POST /accounts <br/>
+### Creating account: POST /accounts 
+
 Request schema:
 ```json
 {
@@ -28,11 +29,11 @@ Request schema:
 - App responds with 201 HTTP status code providing link in form /accounts/{id}/balance in Location header
 - App responds with 400 HTTP error for malformed request
 
-2) Deletion of account: DELETE /accounts/{id}
+### Deletion of account: DELETE /accounts/{id}
 - App responds with 204 HTTP status code
 - Implementation details: account are soft-deleted
 
-3) Getting the balance: GET /accounts/{id}/balance <br/>
+### Getting the balance: GET /accounts/{id}/balance <br/>
 Response schema:
 ```json
 {
@@ -42,7 +43,7 @@ Response schema:
 - App responds with 200 HTTP status code with balance response
 - App responds with 400 HTTP status code in case of account not found or deleted
 
-4) List user accounts: GET /accounts <br/>
+### List user accounts: GET /accounts <br/>
 Response schema:
 ```json
 [
@@ -64,10 +65,10 @@ a) 'count' with default value 10 and maximum allowed 20 & b) 'after' which point
 - App response with 400 HTTP status in case of incorrect count parameter
 - If there is no account with number from 'after' parameter response will repeat the first page
 
-5) List users accounts by user with ADMIN role (auth part will be explained later): GET /accounts/all <br/>
+### List users accounts by user with ADMIN role (auth part will be explained later): GET /accounts/all <br/>
 - Functionality is pretty the same as for previous endpoint but response contains account of all users of the system
 
-6) Money deposit: PUT /transfer/deposit/{txnUUID} <br/>
+### Money deposit: PUT /transfer/deposit/{txnUUID} <br/>
 Request schema:
 ```json
 {
@@ -88,7 +89,7 @@ b) converted using currency service (external, emulated via mock implementation)
 - App responds with 200 HTTP status code in case of correct request
 - App responds with 400 HTTP error in case of error
 
-7) Money withdrawal: PUT /transfer/withdrawal/{txnUUID} <br/>
+### Money withdrawal: PUT /transfer/withdrawal/{txnUUID} <br/>
    Request schema:
 ```json
 {
@@ -110,7 +111,7 @@ b) increased by fee (external service, emulated via mock implementation)
 - App responds with 200 HTTP status code in case of correct request
 - App responds with 400 HTTP error in case of error
 
-8) Money transfer: PUT /transfer/{txnUUID} <br/>
+### Money transfer: PUT /transfer/{txnUUID} <br/>
    Request schema:
 ```json
 {
@@ -133,7 +134,7 @@ b) converted using currency service (external, emulated via mock implementation)
 - App responds with 200 HTTP status code in case of correct request
 - App responds with 400 HTTP error in case of error
 
-9) International Money transfer: PUT /transfer/international/{txnUUID} <br/>
+### International Money transfer: PUT /transfer/international/{txnUUID} <br/>
    Request schema:
 ```json
 {
@@ -159,10 +160,89 @@ c) reduced by fee for international transfers (external service, emulated via mo
 - App responds with 400 HTTP error in case of error
 
 ## Authentication & Authorisation
-todo
+
+Each endpoint requires authentication, it's done via HTTP Basic scheme. 
+Token should be in form <base64 encoded pair clientId:ownerId> where clientId refers to client application which uses API
+and ownerId represents user identity. <br/>
+Each endpoint except GET /accounts/all requires USER role and ownerId to match the requested resource owner (in case of transfers it is payer account).
+GET /accounts/all endpoint requires ADMIN role and clientId should match with privilegedClientId in configuration
+- Supported users can be set via configuration
+- Admin user & privileged client can be set via configuration
 
 ## Data model
-todo
+
+### Account
+```java
+public class Account {
+    private Long id;
+    private String ownerId;
+    private String accountNumber;
+    private BigDecimal balance;
+    private String currencyCode;
+    private String displayedName;
+    private Long lastTxnId;
+    private AccountType type;
+    private Instant createdAt;
+    private Instant deletedAt;
+
+    // getters & setters
+}
+```
+- id is generated during creation
+- accountNumber is generated during creation and is unique
+- type can be one of USER, BASE, CORRESPONDENT, FEE 
+- lastTxnId points to last successful transaction (Txn entity)
+- deletedAt filled when account is deleted
+
+### TxnGroup
+
+```java
+public class TxnGroup {
+
+    private Long id;
+    private UUID txnUUID;
+    private BigDecimal amount;
+    private String currencyCode;
+    private TxnType type;
+    private String payerAccountNumber;
+    private String receiverAccountNumber;
+    private String comment;
+    private Instant createdAt;
+
+    // getters & setters
+}
+```
+- TxnGroup entity represents user request and isn't involved in real money transfer
+- amount is always positive
+- currency code represents currency of request / payer currency in case of transfers
+- type can be one of DEPOSIT, WITHDRAWAL, TRANSFER, INTER_TRANSFER
+
+### Txn
+
+```java
+public class Txn {
+
+    private Long id;
+    private Long accountId;
+    private Long txnGroupId;
+    private BigDecimal amount;
+    private TxnStatus status;
+    private Long linkingTxnId;
+    private TxnSpendingType spendingType;
+    private String details;
+    private Instant createdAt;
+
+    // getters & setters
+}
+```
+- Txn entity represents real money transfer between different types accounts
+- amount can be negative & positive and refers to change of the balance for the related account
+- status field is not used at the moment
+- spendingType can be one of TRANSFER, FEE, EXCHANGE_FEE, EXCHANGE
+- linkingTxnId points to transaction on the other side of money movement, in case of multi currency requests in doesn't 
+refer to destination account but to intermediate (BASE) or special account (FEE, CORRESPONDENT). Two such txns form the
+pair where one is positive and the other is negative both belong to different accounts
+- Every successful money request involves at least one txn pair
 
 ## Accounting of transactions
 todo
