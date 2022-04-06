@@ -34,7 +34,7 @@ public class WithdrawalProcessor extends BaseProcessor {
                             }
 
                             var orgAccount = handle.getAccounts().get(baseAcc.getAccountNumber());
-                            return createGroup(request, txnUUID, TxnType.WITHDRAWAL)
+                            return createGroup(request, txnUUID, TxnType.WITHDRAWAL, request.getCurrencyCode())
                                     .flatMap(group -> performTransfer(
                                             group, TxnSpendingType.TRANSFER,
                                             orgAccount, customerAccount,
@@ -93,7 +93,7 @@ public class WithdrawalProcessor extends BaseProcessor {
         var userComment = "Withdrawal: " + request.getComment();
         var baseDebitComment = "Withdrawal from " + request.getAccountNumber() + ": " + txnUUID;
 
-        return createGroup(request, txnUUID, TxnType.WITHDRAWAL)
+        return createGroup(request, txnUUID, TxnType.WITHDRAWAL, request.getCurrencyCode())
                 .flatMap(group ->
                         performTransfer(
                                 group, TxnSpendingType.TRANSFER,
@@ -102,7 +102,7 @@ public class WithdrawalProcessor extends BaseProcessor {
                                 baseDebitComment, userComment
                         )
                                 .then(performTransfer(
-                                        group, TxnSpendingType.EXCHANGE,
+                                        group, TxnSpendingType.EXCHANGE_FEE,
                                         feeForUser, baseForUser,
                                         fee, fee.negate(),
                                         exchangeFeeComment, exchangeFeeComment

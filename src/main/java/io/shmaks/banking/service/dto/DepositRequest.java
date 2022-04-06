@@ -14,21 +14,30 @@ public class DepositRequest extends MoneyRequest {
     @NotBlank
     private final String accountNumber;
 
+    @NotBlank
+    private final String currencyCode;
+
     @JsonCreator
     public DepositRequest(
             @JsonProperty("accountNumber") String accountNumber,
             @JsonProperty("amount") BigDecimal amount,
             @JsonProperty("currencyCode") String currencyCode,
             @JsonProperty("comment") String comment) {
-        super(amount, currencyCode, comment);
+        super(amount, comment);
         this.accountNumber = accountNumber;
+        this.currencyCode = currencyCode;
     }
 
     public String getAccountNumber() {
         return accountNumber;
     }
 
+    public String getCurrencyCode() {
+        return currencyCode;
+    }
+
     @Override
+    @JsonIgnore
     public String getPayerAccountNumber() {
         return null;
     }
@@ -44,6 +53,7 @@ public class DepositRequest extends MoneyRequest {
         return "DepositRequest{" +
                 super.toString() + "," +
                 "accountNumber='" + accountNumber + '\'' +
+                "currencyCode='" + currencyCode + '\'' +
                 '}';
     }
 }

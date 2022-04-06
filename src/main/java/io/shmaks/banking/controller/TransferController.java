@@ -48,4 +48,15 @@ public class TransferController {
         log.info("withdraw from account: ownerId={}, body={}, txnUUID={}", ownerId, request, txnUUID);
         return service.withdraw(request, ownerId, txnUUID).map(ResponseEntity::ok);
     }
+
+    @PreAuthorize("hasRole('USER')")
+    @PutMapping("/{txnUUID}")
+    public Mono<ResponseEntity<TxnResult>> transfer(
+            @RequestBody @Validated TransferRequest request,
+            @AuthenticationPrincipal String ownerId,
+            @PathVariable UUID txnUUID
+    ) {
+        log.info("transfer between accounts: ownerId={}, body={}, txnUUID={}", ownerId, request, txnUUID);
+        return service.transfer(request, ownerId, txnUUID).map(ResponseEntity::ok);
+    }
 }

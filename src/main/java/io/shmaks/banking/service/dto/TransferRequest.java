@@ -9,51 +9,43 @@ import javax.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 
 @Validated
-public class WithdrawalRequest extends MoneyRequest {
+public class TransferRequest extends MoneyRequest {
 
     @NotBlank
-    private final String accountNumber;
+    private final String payerAccountNumber;
 
     @NotBlank
-    private final String currencyCode;
+    private final String receiverAccountNumber;
 
     @JsonCreator
-    public WithdrawalRequest(
-            @JsonProperty("accountNumber") String accountNumber,
+    public TransferRequest(
+            @JsonProperty("payerAccountNumber") String payerAccountNumber,
+            @JsonProperty("receiverAccountNumber") String receiverAccountNumber,
             @JsonProperty("amount") BigDecimal amount,
-            @JsonProperty("currencyCode") String currencyCode,
             @JsonProperty("comment") String comment) {
         super(amount, comment);
-        this.accountNumber = accountNumber;
-        this.currencyCode = currencyCode;
-    }
-
-    public String getAccountNumber() {
-        return accountNumber;
-    }
-
-    public String getCurrencyCode() {
-        return currencyCode;
+        this.payerAccountNumber = payerAccountNumber;
+        this.receiverAccountNumber = receiverAccountNumber;
     }
 
     @Override
-    @JsonIgnore
+    @JsonProperty("payerAccountNumber")
     public String getPayerAccountNumber() {
-        return accountNumber;
+        return payerAccountNumber;
     }
 
     @Override
-    @JsonIgnore
+    @JsonProperty("receiverAccountNumber")
     public String getReceiverAccountNumber() {
-        return null;
+        return receiverAccountNumber;
     }
 
     @Override
     public String toString() {
-        return "WithdrawalRequest{" +
+        return "TransferRequest{" +
                 super.toString() + "," +
-                "accountNumber='" + accountNumber + '\'' +
-                "currencyCode='" + currencyCode + '\'' +
+                "payerAccountNumber='" + payerAccountNumber + '\'' +
+                "receiverAccountNumber='" + receiverAccountNumber + '\'' +
                 '}';
     }
 }

@@ -13,13 +13,11 @@ import io.shmaks.banking.repo.InMemoryTxnGroupRepo;
 import io.shmaks.banking.repo.InMemoryTxnRepo;
 import io.shmaks.banking.service.AccountService;
 import io.shmaks.banking.service.bookkeeping.OrgAccountsBootstrapper;
-import io.shmaks.banking.service.dto.CreateAccountRequest;
-import io.shmaks.banking.service.dto.DepositRequest;
-import io.shmaks.banking.service.dto.TxnResult;
-import io.shmaks.banking.service.dto.WithdrawalRequest;
+import io.shmaks.banking.service.dto.*;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.function.ThrowingConsumer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.reactive.WebFluxTest;
@@ -34,6 +32,7 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -597,5 +596,254 @@ public class TransferControllerTest {
                 .expectStatus().isOk();
 
         assertThat(acc.getBalance()).isNotNegative();
+    }
+
+    @Test
+    void sameCurrencyTransfer() throws Exception {
+
+        var aliceAccountRequest = new CreateAccountRequest(BigDecimal.valueOf(100), "AED", null);
+        var aliceAccount = Objects.requireNonNull(accountService.create(USER_OWNER_ID, aliceAccountRequest).block());
+        var bobAccountRequest = new CreateAccountRequest(null, "AED", null);
+        var badAccountTransferRequest1 = new TransferRequest("unknown", aliceAccount.getAccountNumber(), BigDecimal.TEN, "bad");
+        var badAccountTransferRequest2 = new TransferRequest(aliceAccount.getAccountNumber(), "unknown", BigDecimal.TEN, "bad");
+
+        var txnUuid = UUID.randomUUID();
+        // todo: validation
+        assertThat(List.of(badAccountTransferRequest1, badAccountTransferRequest2)).allSatisfy(bad ->
+                testClient.put()
+                        .uri("/transfer/" + txnUuid)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                        .bodyValue(bad)
+                        .exchange()
+                        .expectStatus().isBadRequest()
+        );
+
+        var bobAccount = Objects.requireNonNull(accountService.create(OTHER_OWNER_ID, bobAccountRequest).block());
+        var bob2AliceTransfer = new TransferRequest(
+                bobAccount.getAccountNumber(), aliceAccount.getAccountNumber(), BigDecimal.valueOf(60.35), "bob2alice");
+        var alice2BobTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), bobAccount.getAccountNumber(), BigDecimal.valueOf(60.35), "alice2bob");
+        var balanceByAccNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        StepVerifier.create(txnGroupRepo.findByUUID(txnUuid)).verifyComplete();
+
+        Callable<Boolean> round = () -> {
+            var txnUUID1 = UUID.randomUUID();
+            var txnUUID2 = UUID.randomUUID();
+
+            //try by with insufficient
+            testClient.put()
+                    .uri("/transfer/" + txnUUID1)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, OTHER_USER_TOKEN)
+                    .bodyValue(bob2AliceTransfer)
+                    .exchange()
+                    .expectStatus().isBadRequest();
+            // try by receiver
+            testClient.put()
+                    .uri("/transfer/" + txnUUID1)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, OTHER_USER_TOKEN)
+                    .bodyValue(alice2BobTransfer)
+                    .exchange()
+                    .expectStatus().isBadRequest();
+            // try by third party
+            testClient.put()
+                    .uri("/transfer/" + txnUUID1)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, ADMIN_TOKEN)
+                    .bodyValue(alice2BobTransfer)
+                    .exchange()
+                    .expectStatus().isBadRequest();
+
+            Runnable lend = () -> testClient.put()
+                    .uri("/transfer/" + txnUUID1)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                    .bodyValue(alice2BobTransfer)
+                    .exchange()
+                    .expectStatus().isOk().expectBody()
+                    .jsonPath("accountId").isEqualTo(aliceAccount.getId())
+                    .jsonPath("amount").isEqualTo(alice2BobTransfer.getAmount().negate());
+            Runnable returnDebt = () -> testClient.put()
+                    .uri("/transfer/" + txnUUID2)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, OTHER_USER_TOKEN)
+                    .bodyValue(bob2AliceTransfer)
+                    .exchange()
+                    .expectStatus().isOk().expectBody()
+                    .jsonPath("accountId").isEqualTo(bobAccount.getId())
+                    .jsonPath("amount").isEqualTo(bob2AliceTransfer.getAmount().negate());
+            lend.run();
+
+            assertThat(Objects.requireNonNull(accountRepo.findById(aliceAccount.getId()).block()).getLastTxnId()).isNotNull();
+
+            var txnGroup = txnGroupRepo.findByUUID(txnUUID1).block();
+            assertThat(txnGroup).isNotNull()
+                    .returns(alice2BobTransfer.getAmount(), TxnGroup::getAmount)
+                    .returns("AED", TxnGroup::getCurrencyCode)
+                    .returns(TxnType.TRANSFER, TxnGroup::getType)
+                    .returns(alice2BobTransfer.getComment(), TxnGroup::getComment)
+                    .returns(aliceAccount.getAccountNumber(), TxnGroup::getPayerAccountNumber)
+                    .returns(bobAccount.getAccountNumber(), TxnGroup::getReceiverAccountNumber)
+                    .returns(txnUUID1, TxnGroup::getTxnUUID)
+                    .matches(txn -> txn.getCreatedAt() != null);
+
+            var aliceTxn = txnRepo.findByTxnGroupIdAndAccountIdAndSpendingType(
+                    txnGroup.getId(), aliceAccount.getId(), TxnSpendingType.TRANSFER
+            ).block();
+            var bobTxn = txnRepo.findByTxnGroupIdAndAccountIdAndSpendingType(
+                    txnGroup.getId(), bobAccount.getId(), TxnSpendingType.TRANSFER
+            ).block();
+            assertThat(aliceTxn).isNotNull()
+                    .returns(aliceAccount.getId(), Txn::getAccountId)
+                    .returns(alice2BobTransfer.getAmount().negate(), Txn::getAmount)
+                    .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                    .returns(Objects.requireNonNull(bobTxn).getId(), Txn::getLinkingTxnId)
+                    .matches(t -> t.getCreatedAt() != null && t.getDetails() != null);
+            assertThat(bobTxn).isNotNull()
+                    .returns(bobAccount.getId(), Txn::getAccountId)
+                    .returns(alice2BobTransfer.getAmount(), Txn::getAmount)
+                    .returns(TxnStatus.SUCCESS, Txn::getStatus)
+                    .returns(aliceTxn.getId(), Txn::getLinkingTxnId);
+
+            lend.run();
+
+            var delta = alice2BobTransfer.getAmount();
+
+            var newBalancesByNumber = accountRepo.getAccounts().stream()
+                    .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+            assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                    .isEqualTo(balanceByAccNumber.get(aliceAccount.getAccountNumber()).subtract(delta));
+            assertThat(newBalancesByNumber.get(bobAccount.getAccountNumber()))
+                    .isEqualTo(balanceByAccNumber.get(bobAccount.getAccountNumber()).add(delta));
+            newBalancesByNumber.remove(aliceAccount.getAccountNumber());
+            newBalancesByNumber.remove(bobAccount.getAccountNumber());
+            assertThat(newBalancesByNumber).allSatisfy((other, amount) ->
+                    assertThat(balanceByAccNumber.get(other)).isEqualTo(amount)
+            );
+
+            returnDebt.run();
+
+            testClient.put()
+                    .uri("/transfer/" + txnUUID2)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                    .bodyValue(bob2AliceTransfer)
+                    .exchange()
+                    .expectStatus().isBadRequest();
+
+            newBalancesByNumber = accountRepo.getAccounts().stream()
+                    .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+            assertThat(newBalancesByNumber).allSatisfy((other, amount) ->
+                    assertThat(balanceByAccNumber.get(other)).isEqualByComparingTo(amount)
+            );
+
+            return true;
+        };
+
+        for (int i = 0; i < 3; i++) {
+            round.call();
+        }
+    }
+
+    @Test
+    void otherCurrencyTransfer() throws Throwable {
+
+        var aliceAccountRequest = new CreateAccountRequest(BigDecimal.valueOf(100), "AED", null);
+        var aliceAccount = Objects.requireNonNull(accountService.create(USER_OWNER_ID, aliceAccountRequest).block());
+        var bobAccountRequest = new CreateAccountRequest(null, "USD", null);
+        var bobAccount = Objects.requireNonNull(accountService.create(OTHER_OWNER_ID, bobAccountRequest).block());
+        var alice2BobTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), bobAccount.getAccountNumber(), BigDecimal.valueOf(20), "alice2bob");
+        var bob2AliceTransfer = new TransferRequest(
+                bobAccount.getAccountNumber(), aliceAccount.getAccountNumber(), BigDecimal.valueOf(3), "bob2alice");
+
+        var alice2bobFee = feeService.getExchangeFee(
+                new CurrencyPair(aliceAccount.getCurrencyCode(), bobAccount.getCurrencyCode()),
+                alice2BobTransfer.getAmount()
+        ).block();
+        var bob2AlicFee = feeService.getExchangeFee(
+                new CurrencyPair(bobAccount.getCurrencyCode(), aliceAccount.getCurrencyCode()),
+                bob2AliceTransfer.getAmount()
+        ).block();
+        var balanceByAccNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+
+        ThrowingConsumer<Integer> round = times -> {
+            var txnUUID1 = UUID.randomUUID();
+            var txnUUID2 = UUID.randomUUID();
+
+            Runnable lend = () -> testClient.put()
+                    .uri("/transfer/" + txnUUID1)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                    .bodyValue(alice2BobTransfer)
+                    .exchange()
+                    .expectStatus().isOk().expectBody()
+                    .jsonPath("accountId").isEqualTo(aliceAccount.getId())
+                    .jsonPath("amount").isEqualTo(alice2BobTransfer.getAmount().negate());
+            Runnable returnDebt = () -> testClient.put()
+                    .uri("/transfer/" + txnUUID2)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header(HttpHeaders.AUTHORIZATION, OTHER_USER_TOKEN)
+                    .bodyValue(bob2AliceTransfer)
+                    .exchange()
+                    .expectStatus().isOk().expectBody()
+                    .jsonPath("accountId").isEqualTo(bobAccount.getId())
+                    .jsonPath("amount").isEqualTo(bob2AliceTransfer.getAmount().negate());
+            lend.run();
+
+            var txnGroup = txnGroupRepo.findByUUID(txnUUID1).block();
+            assertThat(txnGroup).isNotNull()
+                    .returns(alice2BobTransfer.getAmount(), TxnGroup::getAmount)
+                    .returns("AED", TxnGroup::getCurrencyCode)
+                    .returns(TxnType.TRANSFER, TxnGroup::getType)
+                    .returns(alice2BobTransfer.getComment(), TxnGroup::getComment)
+                    .returns(aliceAccount.getAccountNumber(), TxnGroup::getPayerAccountNumber)
+                    .returns(bobAccount.getAccountNumber(), TxnGroup::getReceiverAccountNumber)
+                    .returns(txnUUID1, TxnGroup::getTxnUUID)
+                    .matches(txn -> txn.getCreatedAt() != null);
+
+            lend.run();
+            var alice2BobAmount = alice2BobTransfer.getAmount();
+            var bob2AliceAmount = bob2AliceTransfer.getAmount();
+            var aliceDelta = alice2BobAmount.multiply(BigDecimal.valueOf(times))
+                    .subtract(bob2AliceAmount.subtract(bob2AlicFee).multiply(BigDecimal.valueOf(USD_2_AED)).multiply(BigDecimal.valueOf(times-1)));
+            var bobDelta = bob2AliceAmount.multiply(BigDecimal.valueOf(times-1))
+                    .subtract(alice2BobAmount.subtract(alice2bobFee).multiply(BigDecimal.valueOf(AED_2_USD)).multiply(BigDecimal.valueOf(times)));
+
+            var newBalancesByNumber = accountRepo.getAccounts().stream()
+                    .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+            assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                    .isEqualByComparingTo(balanceByAccNumber.get(aliceAccount.getAccountNumber()).subtract(aliceDelta));
+            assertThat(newBalancesByNumber.get(bobAccount.getAccountNumber()))
+                    .isEqualByComparingTo(balanceByAccNumber.get(bobAccount.getAccountNumber()).subtract(bobDelta));
+
+            returnDebt.run();
+            aliceDelta = alice2BobAmount.multiply(BigDecimal.valueOf(times))
+                    .subtract(bob2AliceAmount.subtract(bob2AlicFee).multiply(BigDecimal.valueOf(USD_2_AED)).multiply(BigDecimal.valueOf(times)));
+            bobDelta = bob2AliceAmount.multiply(BigDecimal.valueOf(times))
+                    .subtract(alice2BobAmount.subtract(alice2bobFee).multiply(BigDecimal.valueOf(AED_2_USD)).multiply(BigDecimal.valueOf(times)));
+
+            newBalancesByNumber = accountRepo.getAccounts().stream()
+                    .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+            assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                    .isEqualByComparingTo(balanceByAccNumber.get(aliceAccount.getAccountNumber()).subtract(aliceDelta));
+            assertThat(newBalancesByNumber.get(bobAccount.getAccountNumber()))
+                    .isEqualByComparingTo(balanceByAccNumber.get(bobAccount.getAccountNumber()).subtract(bobDelta));
+        };
+
+        for (int i = 0; i < 3; i++) {
+            round.accept(i + 1);
+        }
+
+        var newBalancesByNumber = accountRepo.getAccounts().stream()
+                .collect(Collectors.toMap(Account::getAccountNumber, Account::getBalance));
+        assertThat(newBalancesByNumber.get(aliceAccount.getAccountNumber()))
+                .isLessThan(balanceByAccNumber.get(aliceAccount.getAccountNumber()));
+        assertThat(newBalancesByNumber.get(bobAccount.getAccountNumber()))
+                .isGreaterThan(balanceByAccNumber.get(bobAccount.getAccountNumber()));
     }
 }

@@ -70,11 +70,11 @@ abstract class BaseProcessor {
                 .then();
     }
 
-    Mono<TxnGroup> createGroup(MoneyRequest request, UUID txnUUID, TxnType type) {
+    Mono<TxnGroup> createGroup(MoneyRequest request, UUID txnUUID, TxnType type, String currencyCode) {
         var txnGroup = new TxnGroup();
         txnGroup.setTxnUUID(txnUUID);
         txnGroup.setAmount(request.getAmount());
-        txnGroup.setCurrencyCode(request.getCurrencyCode());
+        txnGroup.setCurrencyCode(currencyCode);
         txnGroup.setComment(request.getComment());
         txnGroup.setReceiverAccountNumber(request.getReceiverAccountNumber());
         txnGroup.setPayerAccountNumber(request.getPayerAccountNumber());

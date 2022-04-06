@@ -11,14 +11,15 @@ import io.shmaks.banking.repo.AccountRepo;
 import io.shmaks.banking.repo.TxnGroupRepo;
 import io.shmaks.banking.repo.TxnRepo;
 import io.shmaks.banking.service.dto.DepositRequest;
+import io.shmaks.banking.service.dto.TransferRequest;
 import io.shmaks.banking.service.dto.TxnResult;
 import io.shmaks.banking.service.dto.WithdrawalRequest;
 import io.shmaks.banking.service.processors.DepositProcessor;
+import io.shmaks.banking.service.processors.TransferProcessor;
 import io.shmaks.banking.service.processors.WithdrawalProcessor;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
-import reactor.util.function.Tuples;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -37,6 +38,7 @@ public class TransferService {
 
     private final DepositProcessor depositProcessor;
     private final WithdrawalProcessor withdrawalProcessor;
+    private final TransferProcessor transferProcessor;
 
     public TransferService(
             TxnGroupRepo txnGroupRepo,
@@ -52,6 +54,7 @@ public class TransferService {
 
         this.depositProcessor = new DepositProcessor(txnGroupRepo, txnRepo, accountRepo);
         this.withdrawalProcessor = new WithdrawalProcessor(txnGroupRepo, txnRepo, accountRepo);
+        this.transferProcessor = new TransferProcessor(txnGroupRepo, txnRepo, accountRepo);
     }
 
     @Transactional
@@ -61,7 +64,8 @@ public class TransferService {
         var userAccount = accountRepo
                 .findByAccountNumber(accountNumber)
                 .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
-                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)));
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)))
+                .cache();
 
         var existing = txnGroupRepo.findByUUID(txnUUID);
 
@@ -83,7 +87,8 @@ public class TransferService {
         var userAccount = accountRepo
                 .findByAccountNumber(accountNumber)
                 .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
-                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)));
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + accountNumber)))
+                .cache();
 
         var existing = txnGroupRepo.findByUUID(txnUUID);
 
@@ -96,6 +101,34 @@ public class TransferService {
                 })
                 .switchIfEmpty(doWithdraw(request, userAccount, txnUUID))
                 .flatMap(txnGroup -> fetchExisting(txnGroup, userAccount));
+    }
+
+    @Transactional
+    public Mono<TxnResult> transfer(TransferRequest request, String ownerId, UUID txnUUID) {
+        var payerAccNum = request.getPayerAccountNumber();
+        var receiverAccNum = request.getReceiverAccountNumber();
+
+        var payerAccount = accountRepo
+                .findByAccountNumber(payerAccNum)
+                .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + payerAccNum)));
+
+        var receiverAccount = accountRepo
+                .findByAccountNumber(receiverAccNum)
+                .filter(account -> account.getType() == AccountType.USER)
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + receiverAccNum)));
+
+        var existing = txnGroupRepo.findByUUID(txnUUID);
+
+        return existing
+                .flatMap(group -> {
+                    if (!Objects.equals(group.getPayerAccountNumber(), payerAccNum)) {
+                        return Mono.error(new BusinessLogicError("Unknown user account " + payerAccNum));
+                    }
+                    return Mono.just(group);
+                })
+                .switchIfEmpty(doTransfer(request, payerAccount, receiverAccount, txnUUID))
+                .flatMap(txnGroup -> fetchExisting(txnGroup, payerAccount));
     }
 
     private Mono<TxnGroup> doDeposit(DepositRequest request, Mono<Account> userAccount, UUID txnUuid) {
@@ -139,6 +172,31 @@ public class TransferService {
                 );
                 return rateAndFee.flatMap(tuple -> withdrawalProcessor.makeCrossCurrencyWithdrawal(
                         request, account.getCurrencyCode(), txnUuid, BigDecimal.valueOf(tuple.getT1()), tuple.getT2()
+                ));
+            }
+        });
+    }
+
+    private Mono<TxnGroup> doTransfer(
+            TransferRequest request, Mono<Account> payerAccount, Mono<Account> receiverAccount, UUID txnUuid) {
+        return Mono.zip(payerAccount, receiverAccount).flatMap(accounts -> {
+            var payerCurrency = accounts.getT1().getCurrencyCode();
+            var receiverCurrency = accounts.getT2().getCurrencyCode();
+            if (payerCurrency.equals(receiverCurrency)) {
+                return transferProcessor.makeSimpleTransfer(request, txnUuid);
+            } else {
+                var currencyPair = new CurrencyPair(payerCurrency, receiverCurrency);
+                //noinspection DuplicatedCode
+                var rate = currencyService.getRates(List.of(currencyPair))
+                        .handle((Map<CurrencyPair, Double> rates, SynchronousSink<Double> sink) -> {
+                            if (rates.size() == 1) {
+                                sink.next(rates.values().iterator().next());
+                            }
+                        })
+                        .switchIfEmpty(Mono.error(new BusinessLogicError("Unsupported currency pair " + currencyPair)));
+                var fee = feeService.getExchangeFee(currencyPair, request.getAmount());
+                return Mono.zip(rate, fee).flatMap(tuple -> transferProcessor.makeCrossCurrencyTransfer(
+                        request, payerCurrency, receiverCurrency, txnUuid, BigDecimal.valueOf(tuple.getT1()), tuple.getT2()
                 ));
             }
         });
