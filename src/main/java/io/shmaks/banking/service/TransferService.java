@@ -15,6 +15,7 @@ import io.shmaks.banking.service.dto.TransferRequest;
 import io.shmaks.banking.service.dto.TxnResult;
 import io.shmaks.banking.service.dto.WithdrawalRequest;
 import io.shmaks.banking.service.processors.DepositProcessor;
+import io.shmaks.banking.service.processors.InternationalTransferProcessor;
 import io.shmaks.banking.service.processors.TransferProcessor;
 import io.shmaks.banking.service.processors.WithdrawalProcessor;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +40,7 @@ public class TransferService {
     private final DepositProcessor depositProcessor;
     private final WithdrawalProcessor withdrawalProcessor;
     private final TransferProcessor transferProcessor;
+    private final InternationalTransferProcessor interTransferProcessor;
 
     public TransferService(
             TxnGroupRepo txnGroupRepo,
@@ -55,6 +57,7 @@ public class TransferService {
         this.depositProcessor = new DepositProcessor(txnGroupRepo, txnRepo, accountRepo);
         this.withdrawalProcessor = new WithdrawalProcessor(txnGroupRepo, txnRepo, accountRepo);
         this.transferProcessor = new TransferProcessor(txnGroupRepo, txnRepo, accountRepo);
+        this.interTransferProcessor = new InternationalTransferProcessor(txnGroupRepo, txnRepo, accountRepo);
     }
 
     @Transactional
@@ -131,6 +134,34 @@ public class TransferService {
                 .flatMap(txnGroup -> fetchExisting(txnGroup, payerAccount));
     }
 
+    @Transactional
+    public Mono<TxnResult> internationalTransfer(TransferRequest request, String ownerId, UUID txnUUID) {
+        var payerAccNum = request.getPayerAccountNumber();
+        var receiverAccNum = request.getReceiverAccountNumber();
+
+        var payerAccount = accountRepo
+                .findByAccountNumber(payerAccNum)
+                .filter(account -> account.getType() == AccountType.USER && account.getOwnerId().equals(ownerId))
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown user account " + payerAccNum)));
+
+        var receiverAccount = accountRepo
+                .findByAccountNumber(receiverAccNum)
+                .filter(account -> account.getType() == AccountType.CORRESPONDENT)
+                .switchIfEmpty(Mono.error(new BusinessLogicError("Unknown correspondent account " + receiverAccNum)));
+
+        var existing = txnGroupRepo.findByUUID(txnUUID);
+
+        return existing
+                .flatMap(group -> {
+                    if (!Objects.equals(group.getPayerAccountNumber(), payerAccNum)) {
+                        return Mono.error(new BusinessLogicError("Unknown user account " + payerAccNum));
+                    }
+                    return Mono.just(group);
+                })
+                .switchIfEmpty(doInterTransfer(request, payerAccount, receiverAccount, txnUUID))
+                .flatMap(txnGroup -> fetchExisting(txnGroup, payerAccount));
+    }
+
     private Mono<TxnGroup> doDeposit(DepositRequest request, Mono<Account> userAccount, UUID txnUuid) {
         return userAccount.flatMap(account -> {
             if (account.getCurrencyCode().equals(request.getCurrencyCode())) {
@@ -198,6 +229,42 @@ public class TransferService {
                 return Mono.zip(rate, fee).flatMap(tuple -> transferProcessor.makeCrossCurrencyTransfer(
                         request, payerCurrency, receiverCurrency, txnUuid, BigDecimal.valueOf(tuple.getT1()), tuple.getT2()
                 ));
+            }
+        });
+    }
+
+    private Mono<TxnGroup> doInterTransfer(
+            TransferRequest request, Mono<Account> payerAccount, Mono<Account> receiverAccount, UUID txnUuid) {
+        return Mono.zip(payerAccount, receiverAccount).flatMap(accounts -> {
+            var payerCurrency = accounts.getT1().getCurrencyCode();
+            var receiverCurrency = accounts.getT2().getCurrencyCode();
+
+            if (payerCurrency.equals(receiverCurrency)) {
+                return feeService.getInternationalFee(payerCurrency, request.getAmount()).flatMap(fee ->
+                        interTransferProcessor.makeSimpleTransfer(request, payerCurrency, txnUuid, fee)
+                );
+            } else {
+                var currencyPair = new CurrencyPair(payerCurrency, receiverCurrency);
+                //noinspection DuplicatedCode
+                var rate = currencyService.getRates(List.of(currencyPair))
+                        .handle((Map<CurrencyPair, Double> rates, SynchronousSink<Double> sink) -> {
+                            if (rates.size() == 1) {
+                                sink.next(rates.values().iterator().next());
+                            }
+                        })
+                        .switchIfEmpty(Mono.error(new BusinessLogicError("Unsupported currency pair " + currencyPair)));
+                var fee = feeService.getExchangeFee(currencyPair, request.getAmount());
+                return Mono.zip(rate, fee).flatMap(tuple -> {
+                    var exchangeFee = tuple.getT2();
+                    var rateAmount = BigDecimal.valueOf(tuple.getT1());
+                    var boughtAmount = request.getAmount().subtract(exchangeFee).multiply(rateAmount);
+
+                    return feeService.getInternationalFee(receiverCurrency, boughtAmount).flatMap(interFee ->
+                            interTransferProcessor.makeCrossCurrencyTransfer(
+                                    request, payerCurrency, receiverCurrency, txnUuid, rateAmount, exchangeFee, interFee
+                            )
+                    );
+                });
             }
         });
     }

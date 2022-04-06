@@ -61,4 +61,15 @@ public class TransferController {
         log.info("transfer between accounts: ownerId={}, body={}, txnUUID={}", ownerId, request, txnUUID);
         return service.transfer(request, ownerId, txnUUID).map(ResponseEntity::ok);
     }
+
+    @PreAuthorize("hasRole('USER')")
+    @PutMapping("/international/{txnUUID}")
+    public Mono<ResponseEntity<TxnResult>> interTransfer(
+            @RequestBody @Validated TransferRequest request,
+            @AuthenticationPrincipal String ownerId,
+            @PathVariable UUID txnUUID
+    ) {
+        log.info("international transfer between accounts: ownerId={}, body={}, txnUUID={}", ownerId, request, txnUUID);
+        return service.internationalTransfer(request, ownerId, txnUUID).map(ResponseEntity::ok);
+    }
 }
