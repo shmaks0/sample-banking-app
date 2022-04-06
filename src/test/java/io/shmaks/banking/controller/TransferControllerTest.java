@@ -624,6 +624,16 @@ public class TransferControllerTest {
                         .expectStatus().isBadRequest()
         );
 
+        var alice2AliceTransfer = new TransferRequest(
+                aliceAccount.getAccountNumber(), aliceAccount.getAccountNumber(), BigDecimal.valueOf(10), "alice2alice");
+        testClient.put()
+                .uri("/transfer/" + txnUuid)
+                .contentType(MediaType.APPLICATION_JSON)
+                .header(HttpHeaders.AUTHORIZATION, USER_TOKEN)
+                .bodyValue(alice2AliceTransfer)
+                .exchange()
+                .expectStatus().isBadRequest();
+
         var bobAccount = Objects.requireNonNull(accountService.create(OTHER_OWNER_ID, bobAccountRequest).block());
         var bob2AliceTransfer = new TransferRequest(
                 bobAccount.getAccountNumber(), aliceAccount.getAccountNumber(), BigDecimal.valueOf(60.35), "bob2alice");
@@ -815,8 +825,8 @@ public class TransferControllerTest {
             var alice2BobAmount = alice2BobTransfer.getAmount();
             var bob2AliceAmount = bob2AliceTransfer.getAmount();
             var aliceDelta = alice2BobAmount.multiply(BigDecimal.valueOf(times))
-                    .subtract(bob2AliceAmount.subtract(bob2AlicFee).multiply(BigDecimal.valueOf(USD_2_AED)).multiply(BigDecimal.valueOf(times-1)));
-            var bobDelta = bob2AliceAmount.multiply(BigDecimal.valueOf(times-1))
+                    .subtract(bob2AliceAmount.subtract(bob2AlicFee).multiply(BigDecimal.valueOf(USD_2_AED)).multiply(BigDecimal.valueOf(times - 1)));
+            var bobDelta = bob2AliceAmount.multiply(BigDecimal.valueOf(times - 1))
                     .subtract(alice2BobAmount.subtract(alice2bobFee).multiply(BigDecimal.valueOf(AED_2_USD)).multiply(BigDecimal.valueOf(times)));
 
             var newBalancesByNumber = accountRepo.getAccounts().stream()

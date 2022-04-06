@@ -5,8 +5,10 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.validation.annotation.Validated;
 
+import javax.validation.constraints.AssertTrue;
 import javax.validation.constraints.NotBlank;
 import java.math.BigDecimal;
+import java.util.Objects;
 
 @Validated
 public class TransferRequest extends MoneyRequest {
@@ -38,6 +40,12 @@ public class TransferRequest extends MoneyRequest {
     @JsonProperty("receiverAccountNumber")
     public String getReceiverAccountNumber() {
         return receiverAccountNumber;
+    }
+
+    @JsonIgnore
+    @AssertTrue(message = "payerAccountNumber & receiverAccountNumber should be different")
+    public boolean isAccountsDifferent() {
+        return payerAccountNumber != null && receiverAccountNumber != null && !Objects.equals(payerAccountNumber, receiverAccountNumber);
     }
 
     @Override
